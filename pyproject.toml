@@ -10,5 +10,6 @@ dependencies = [
     "pandas>=2.3.3",
     "scikit-learn>=1.7.2",
     "sentence-transformers>=5.4.0",
+    "starlit>=0.1.0",
     "torch>=2.11.0",
 ]
