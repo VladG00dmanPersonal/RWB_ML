@@ -3,6 +3,7 @@
 *.csv
 *.png
 *.jpg
+*.pth
 
 *MAC*
 
