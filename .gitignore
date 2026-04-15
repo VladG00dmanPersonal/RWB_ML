@@ -4,6 +4,7 @@
 *.png
 *.jpg
 *.pth
+*.npy
 
 *MAC*
 
