@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-from model import Model
+from inference.model import Model
 
 
 @st.cache_resource

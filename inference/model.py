@@ -14,10 +14,10 @@ from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 tqdm.pandas()
-DEVICE = "mps" if torch.mps.is_available() else "cpu"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-DATA_FOLDER = Path(r"data")
-IMAGE_FOLDER = Path(r"data/images")
+DATA_FOLDER = Path(r"../data")
+IMAGE_FOLDER = Path(r"../data/images")
 
 
 class ImageDataset(Dataset):
