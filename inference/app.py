@@ -1,3 +1,5 @@
+import time
+
 import pandas as pd
 import streamlit as st
 from PIL import Image
@@ -18,6 +20,9 @@ def predict(name, description, images):
         output = pd.DataFrame({'image': list(map(lambda img: img.name, images)), 'relevancy': prediction})
         st.header('Prediction')
         st.dataframe(output)
+        for i in range(50):
+            st.balloons()
+            time.sleep(0.1)
 
 def render_form():
     st.title("Product image relevancy prediction")
