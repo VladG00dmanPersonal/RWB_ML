@@ -3,11 +3,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import streamlit
 import torch
 from PIL import Image
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
+from catboost import CatBoostClassifier
+from sentence_transformers import SentenceTransformer
 from torch.utils.data import Dataset, DataLoader
 from torchvision import models, transforms
 from tqdm import tqdm
@@ -18,26 +18,6 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 DATA_FOLDER = Path(r"../data")
 IMAGE_FOLDER = Path(r"../data/images")
-
-
-class ImageDataset(Dataset):
-    def __init__(self, root_dir, df):
-        self.samples = [str(root_dir) + "/" + str(i) + '.jpg' for i in df['id'].tolist()]
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        img_path = self.samples[idx]
-        img = Image.open(img_path).convert('RGB')
-        w, h = img.size if isinstance(img, Image.Image) else (img.shape[2], img.shape[1])
-        min_side = min(w, h)
-        img_cropped = transforms.CenterCrop(min_side)(img)
-        img_resized = transforms.Resize((256, 256))(img_cropped)
-        img_tensor = transforms.ToTensor()(img_resized)
-
-        return img_tensor
-
 
 class LoadedImageDataset(Dataset):
     def __init__(self, images):
@@ -59,54 +39,87 @@ class LoadedImageDataset(Dataset):
 
 class Model:
     def __init__(self):
-        self.res_net50 = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1).to(DEVICE)
-        train_df = pd.read_csv(DATA_FOLDER / "train.csv")
-        tr_images_ds = ImageDataset(IMAGE_FOLDER, train_df)
-
         self.batch_size = 32
+        self.img_emb_len = 512
+        self.text_emb_len = 512
+        self.features = [f'f{i}' for i in range(1000)]
+        self.features += [f'img{i}' for i in range(self.img_emb_len)]
+        self.features += [f'text{i}' for i in range(self.text_emb_len)]
+        self.features.append('description')
+        streamlit.header("")
+        with streamlit.spinner('Loading ResNet...'):
+            self.res_net = models.resnet34(weights=models.ResNet34_Weights.IMAGENET1K_V1).to(DEVICE)
+        with streamlit.spinner('Loading CatBoost...'):
+            self.catboost_model = CatBoostClassifier().load_model("ML_solve/Semøn/notebooks/catboost_model.cbm")
+        with streamlit.spinner('Loading SentenceTransformer...'):
+            self.emb_model = SentenceTransformer(
+                "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+                trust_remote_code=True,
+                device=DEVICE,
+                truncate_dim=512
+            )
 
-        images = DataLoader(tr_images_ds, batch_size=self.batch_size, shuffle=False)
+    def get_embeddings(self, texts, imgs):
+        batch_size = 256
 
-        self.sureness50 = []
+        text_embeds = []
+        image_embeds = []
 
-        for batch in tqdm(images):
-            with torch.no_grad():
-                image_sure50 = self.res_net50(batch.to(DEVICE))
+        for i in tqdm(range(0, len(texts), batch_size), desc="Batches"):
+            text_batch = texts[i: i + batch_size]
+            img_batch = imgs[i: i + batch_size]
+            img_paths = []
+            for i in range(len(img_batch)):
+                path = f"/tmp/ml_img{i}.jpg"
+                img_paths.append(path)
+                img_batch[i].save(path)
 
-            sure50 = image_sure50.to('cpu').numpy()
+            text_emb = self.emb_model.encode(
+                text_batch,
+                normalize_embeddings=True,
+                batch_size=len(text_batch),
+                show_progress_bar=False,
+                device=DEVICE
+            )
 
-            self.sureness50.extend(sure50)
-        # %%
-        for i in range(1000):
-            train_df[f"f{i}"] = [self.sureness50[j][i] for j in range(len(self.sureness50))]
+            image_emb = self.emb_model.encode(
+                img_paths,
+                normalize_embeddings=True,
+                batch_size=len(img_batch),
+                show_progress_bar=False,
+                device=DEVICE
+            )
 
-        self.features = [f'f{u}' for u in range(1000)]
-        target = 'label'
-        # %%
-        X_tr, X_val, y_tr, y_val = train_test_split(train_df[self.features], train_df[target], test_size=0.3, shuffle=True)
-        # %%
-        self.logreg_model = LogisticRegression(n_jobs=-1, solver='newton-cholesky')
+            text_embeds.extend(text_emb)
+            image_embeds.extend(image_emb)
 
-        self.logreg_model.fit(X_tr, y_tr)
-        pred = self.logreg_model.predict(X_val)
-        print("Точность на валидационной выборке:", accuracy_score(pred, y_val))
-        # %%
-        self.logreg_model.fit(train_df[self.features], train_df[target])
-        pass
+        return text_embeds, image_embeds
 
     def predict(self, name : str, description : str, images : list[Image.Image]) -> np.ndarray:
+        text = f"Название товара: {name}. Описание товара: {description}"
         ts_images_ds = LoadedImageDataset(images)
         images_ts = DataLoader(ts_images_ds, batch_size=self.batch_size, shuffle=False)
-        sureness50_ts = []
+        sureness_ts = []
+        test_df = pd.DataFrame()
+        test_text_emb, test_img_emb = self.get_embeddings([text] * len(images), images)
 
         for images_ in tqdm(images_ts):
             with torch.no_grad():
-                sure = self.res_net50(images_.to(DEVICE))
+                sure = self.res_net(images_.to(DEVICE))
 
-            sureness50_ts.extend(sure.to('cpu').numpy().tolist())
-        test_df = pd.DataFrame()
+            sureness_ts.extend(sure.to('cpu').numpy().tolist())
+
         for i in range(1000):
-            test_df[f"f{i}"] = [sureness50_ts[j][i] for j in range(len(sureness50_ts))]
+            test_df[f"f{i}"] = [sureness_ts[j][i] for j in range(len(sureness_ts))]
 
-        pred_ts = self.logreg_model.predict_proba(test_df[self.features])
+        for i in range(self.text_emb_len):
+            test_df[f"text{i}"] = [test_text_emb[j][i] for j in range(len(test_text_emb))]
+
+        for i in range(self.img_emb_len):
+            test_df[f"img{i}"] = [test_img_emb[j][i] for j in range(len(test_img_emb))]
+
+        test_df['description'] = description
+
+        pred_ts = self.catboost_model.predict_proba(test_df[self.features])
+        test_df['y_pred'] = [i[1] for i in pred_ts.tolist()]
         return np.array([i[1] for i in pred_ts.tolist()])

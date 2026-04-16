@@ -2,7 +2,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-from inference.model import Model
+from model import Model
 
 
 @st.cache_resource
@@ -12,7 +12,7 @@ def load_model():
 
 
 def predict(name, description, images):
-    loaded_images = list(map(Image.open, images))
+    loaded_images = list(map(lambda img: Image.open(img).convert('RGB'), images))
     with st.spinner('Predicting...'):
         prediction = model.predict(name, description, loaded_images)
         output = pd.DataFrame({'image': list(map(lambda img: img.name, images)), 'relevancy': prediction})
