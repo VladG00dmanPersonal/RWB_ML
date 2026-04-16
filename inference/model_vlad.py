@@ -17,7 +17,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 def load_resnet():
     model = models.resnet50(weights=None)
     model.fc = nn.Linear(model.fc.in_features, 1)
-    url = "http://84.32.223.81/best_my_resnet.pth"
+    url = "http://84.32.223.81:54321/best_my_resnet.pth"
     if "best_my_resnet.pth" not in os.listdir("./"):
         urlretrieve(url, "best_my_resnet.pth")
     model.load_state_dict(torch.load('best_my_resnet.pth', map_location=torch.device(DEVICE)))
